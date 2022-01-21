@@ -1,6 +1,6 @@
 ---
 id: nnarv
-name: ⚙️ How to Add a New Platform
+name: ⚙️Platform and environment variables
 file_version: 1.0.2
 app_version: 0.7.2-0
 file_blobs:
