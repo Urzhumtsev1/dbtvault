@@ -179,7 +179,7 @@ Aa simple dictionary comprehension filters the main fixture registry by platform
 
 This is the magic that brings it all together. This function runs before every tag (e.g. @fixture)
 
-It gets the current platform and fetches the fixtures for that platform, then selects the platform-specific implementation of the fixture if it finds a tag of the fixture type on a scenario.
+It gets the current platform and fetches the fixtures for that platform, then selects the platform-specific implementation of the fixture, if it finds a tag of the fixture type on a scenario.
 <!-- NOTE-swimm-snippet: the lines below link your snippet to Swimm -->
 ### 📄 test/features/environment.py
 ```python
