@@ -1,16 +1,12 @@
 {%- macro hub(src_pk, src_nk, src_ldts, src_source, source_model) -%}
 
-    {{- adapter.dispatch('hub', 'dbtvault')(src_pk=src_pk, src_nk=src_nk,
-                                            src_ldts=src_ldts, src_source=src_source,
-                                            source_model=source_model) -}}
+    {{- adapter.dispatch('hub', packages = dbtvault.get_dbtvault_namespaces())(src_pk=src_pk, src_nk=src_nk,
+                                                                               src_ldts=src_ldts, src_source=src_source,
+                                                                               source_model=source_model) -}}
 
 {%- endmacro -%}
 
 {%- macro default__hub(src_pk, src_nk, src_ldts, src_source, source_model) -%}
-
-{{- dbtvault.check_required_parameters(src_pk=src_pk, src_nk=src_nk,
-                                       src_ldts=src_ldts, src_source=src_source,
-                                       source_model=source_model) -}}
 
 {%- set source_cols = dbtvault.expand_column_list(columns=[src_pk, src_nk, src_ldts, src_source]) -%}
 
@@ -33,18 +29,24 @@
 {%- set source_number = loop.index | string -%}
 
 row_rank_{{ source_number }} AS (
+
+SELECT * FROM (
+
     {%- if model.config.materialized == 'vault_insert_by_rank' %}
-    SELECT {{ dbtvault.prefix(source_cols_with_rank, 'rr') }},
+    SELECT {{ source_cols_with_rank | join(', ') }},
     {%- else %}
-    SELECT {{ dbtvault.prefix(source_cols, 'rr') }},
+    SELECT {{ source_cols | join(', ') }},
     {%- endif %}
            ROW_NUMBER() OVER(
-               PARTITION BY {{ dbtvault.prefix([src_pk], 'rr') }}
-               ORDER BY {{ dbtvault.prefix([src_ldts], 'rr') }}
+               PARTITION BY {{ src_pk }}
+               ORDER BY {{ src_ldts }} ASC
            ) AS row_number
-    FROM {{ ref(src) }} AS rr
-    WHERE {{ dbtvault.multikey(src_pk, prefix='rr', condition='IS NOT NULL') }}
-    QUALIFY row_number = 1
+    FROM {{ ref(src) }}
+
+) as h
+WHERE row_number = 1
+
+
     {%- set ns.last_cte = "row_rank_{}".format(source_number) %}
 ),{{ "\n" if not loop.last }}
 {% endfor -%}
@@ -77,24 +79,29 @@ stage_mat_filter AS (
 {%- if source_model | length > 1 %}
 
 row_rank_union AS (
-    SELECT ru.*,
+
+SELECT * FROM (
+
+    SELECT *,
            ROW_NUMBER() OVER(
-               PARTITION BY {{ dbtvault.prefix([src_pk], 'ru') }}
-               ORDER BY {{ dbtvault.prefix([src_ldts], 'ru') }}, {{ dbtvault.prefix([src_source], 'ru') }} ASC
+               PARTITION BY {{ src_pk }}
+               ORDER BY {{ src_ldts }}, {{ src_source }} ASC
            ) AS row_rank_number
-    FROM {{ ns.last_cte }} AS ru
-    WHERE {{ dbtvault.multikey(src_pk, prefix='ru', condition='IS NOT NULL') }}
-    QUALIFY row_rank_number = 1
+    FROM {{ ns.last_cte }}
+    WHERE {{ src_pk }} IS NOT NULL
+) as h 
+WHERE row_rank_number = 1
+
     {%- set ns.last_cte = "row_rank_union" %}
 ),
 {% endif %}
 records_to_insert AS (
     SELECT {{ dbtvault.prefix(source_cols, 'a', alias_target='target') }}
     FROM {{ ns.last_cte }} AS a
-    {%- if dbtvault.is_any_incremental() %}
+    {%- if dbtvault.is_vault_insert_by_period() or is_incremental() %}
     LEFT JOIN {{ this }} AS d
-    ON {{ dbtvault.multikey(src_pk, prefix=['a','d'], condition='=') }}
-    WHERE {{ dbtvault.multikey(src_pk, prefix='d', condition='IS NULL') }}
+    ON a.{{ src_pk }} = d.{{ src_pk }}
+    WHERE {{ dbtvault.prefix([src_pk], 'd') }} IS NULL
     {%- endif %}
 )
 
